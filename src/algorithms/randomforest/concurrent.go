@@ -1,4 +1,4 @@
-package randomforest
+package randomForest
 
 import (
 	"fmt"
@@ -187,8 +187,6 @@ func (forest *ForestConcurrent) WeightVote(x []float64) []float64 {
 				votes[j] += v[j] * w
 			}
 			total += w
-		} else {
-			//fmt.Println("wv", e, w, total)
 		}
 	}
 	for j := 0; j < forest.Classes; j++ {
@@ -401,34 +399,6 @@ func (branch *BranchConcurrent) depth(x []float64) int {
 	return branch.Branch0.depth(x)
 }
 
-func (branch *BranchConcurrent) print() {
-	if branch.IsLeaf {
-		fmt.Printf("%s ... LEAF %v\tsize: %6d\tgini: %5.4f\n",
-			repeatConcurrent("_", branch.Depth*3), branch.LeafValue, branch.Size, branch.Gini)
-	} else {
-		fmt.Printf("%s ... size: %6d\tattr: %3d\tgini: %5.4f %5.4f \t\tvalue: %4.3f\n",
-			repeatConcurrent("_", branch.Depth*3), branch.Size, branch.Attribute, branch.Gini, branch.GiniGain, branch.Value)
-		branch.Branch0.print()
-		branch.Branch1.print()
-		fmt.Printf("%s\n", repeatConcurrent("_", branch.Depth*3))
-	}
-}
-
-func (branch *BranchConcurrent) branches() int {
-	if branch.IsLeaf {
-		return 1
-	}
-	return branch.Branch0.branches() + branch.Branch1.branches()
-}
-
-func repeatConcurrent(s string, n int) string {
-	z := s
-	for i := 0; i < n; i++ {
-		z = z + s
-	}
-	return z
-}
-
 func giniConcurrent(data []int) float64 {
 	sum := 0
 	for _, a := range data {
@@ -444,15 +414,30 @@ func giniConcurrent(data []int) float64 {
 	return g
 }
 
-func (forest *ForestConcurrent) PredictConcurrent(x []float64) int {
-    probabilities := forest.Vote(x)
-    maxIndex := 0
-    maxValue := probabilities[0]
-    for i, value := range probabilities {
-        if value > maxValue {
-            maxValue = value
-            maxIndex = i
+func (forest *ForestConcurrent) PredictConcurrent(data [][]float64) []int {
+    predictions := make([]int, len(data))
+    for i, x := range data {
+        probabilities := forest.Vote(x)
+        maxIndex := 0
+        maxValue := probabilities[0]
+        for j, value := range probabilities {
+            if value > maxValue {
+                maxValue = value
+                maxIndex = j
+            }
+        }
+        predictions[i] = maxIndex
+    }
+    return predictions
+}
+
+// Accuracy calcula la precisión del modelo dado un conjunto de predicciones y sus etiquetas verdaderas
+func (forest *ForestConcurrent) Accuracy(predictions []int, trueLabels []int) float64 {
+    correct := 0
+    for i, label := range trueLabels {
+        if predictions[i] == label {
+            correct++
         }
     }
-    return maxIndex
+    return float64(correct) / float64(len(trueLabels))
 }

@@ -1,4 +1,4 @@
-package randomforest
+package randomForest
 
 import (
 	"fmt"
@@ -16,16 +16,16 @@ var (
 
 // ForestSequencial je base class for whole forest with database, properties of ForestSequencial and trees.
 type ForestSequencial struct {
-	Data              ForestDataSequencial // database for calculate trees
-	Trees             []TreeSequencial     // all generated trees
-	Features          int        // number of attributes
-	Classes           int        // number of classes
-	LeafSize          int        // leaf size
-	MFeatures         int        // attributes for choose proper split
-	NTrees            int        // number of trees
-	NSize             int        // len of data
-	MaxDepth          int        // max depth of forest
-	FeatureImportance []float64  //stats of FeatureImportance
+	Data              ForestDataSequencial  // database for calculate trees
+	Trees             []TreeSequencial      // all generated trees
+	Features          int        			// number of attributes
+	Classes           int        			// number of classes
+	LeafSize          int        		 	// leaf size
+	MFeatures         int        			// attributes for choose proper split
+	NTrees            int        			// number of trees
+	NSize             int        			// len of data
+	MaxDepth          int       			// max depth of forest
+	FeatureImportance []float64  			//stats of FeatureImportance
 }
 
 // ForestDataSequencial contains database
@@ -390,34 +390,6 @@ func (branch *BranchSequencial) depth(x []float64) int {
 	return branch.Branch0.depth(x)
 }
 
-func (branch *BranchSequencial) print() {
-	if branch.IsLeaf {
-		fmt.Printf("%s ... LEAF %v\tsize: %6d\tgini: %5.4f\n",
-			repeat("_", branch.Depth*3), branch.LeafValue, branch.Size, branch.Gini)
-	} else {
-		fmt.Printf("%s ... size: %6d\tattr: %3d\tgini: %5.4f %5.4f \t\tvalue: %4.3f\n",
-			repeat("_", branch.Depth*3), branch.Size, branch.Attribute, branch.Gini, branch.GiniGain, branch.Value)
-		branch.Branch0.print()
-		branch.Branch1.print()
-		fmt.Printf("%s\n", repeat("_", branch.Depth*3))
-	}
-}
-
-func (branch *BranchSequencial) branches() int {
-	if branch.IsLeaf {
-		return 1
-	}
-	return branch.Branch0.branches() + branch.Branch1.branches()
-}
-
-func repeat(s string, n int) string {
-	z := s
-	for i := 0; i < n; i++ {
-		z = z + s
-	}
-	return z
-}
-
 func gini(data []int) float64 {
 	sum := 0
 	for _, a := range data {
@@ -433,15 +405,30 @@ func gini(data []int) float64 {
 	return g
 }
 
-func (forest *ForestSequencial) PredictSequencial(x []float64) int {
-    probabilities := forest.Vote(x)
-    maxIndex := 0
-    maxValue := probabilities[0]
-    for i, value := range probabilities {
-        if value > maxValue {
-            maxValue = value
-            maxIndex = i
+func (forest *ForestSequencial) PredictSequencial(data [][]float64) []int {
+    predictions := make([]int, len(data))
+    for i, x := range data {
+        probabilities := forest.Vote(x)
+        maxIndex := 0
+        maxValue := probabilities[0]
+        for j, value := range probabilities {
+            if value > maxValue {
+                maxValue = value
+                maxIndex = j
+            }
+        }
+        predictions[i] = maxIndex
+    }
+    return predictions
+}
+
+// Accuracy calcula la precisión del modelo dado un conjunto de predicciones y sus etiquetas verdaderas
+func (forest *ForestSequencial) Accuracy(predictions []int, trueLabels []int) float64 {
+    correct := 0
+    for i, label := range trueLabels {
+        if predictions[i] == label {
+            correct++
         }
     }
-    return maxIndex
+    return float64(correct) / float64(len(trueLabels))
 }

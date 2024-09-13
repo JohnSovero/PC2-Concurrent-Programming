@@ -1,169 +1,275 @@
 package dnn
 
 import (
-	"math/rand"
+    "errors"
+    "fmt"
+    "math"
+    "math/rand"
 	"sync"
-	"time"
 )
 
-// NeuronLayerConcurrent representa una capa de neuronas
-type NeuronLayerConcurrent struct {
-	Weights [][]float64
-	Biases  []float64
-	Outputs []float64
+// Loss calcula la pérdida entre las predicciones y las etiquetas concurrentemente
+func LossConcurrent(predictions, labels Frame) float32 {
+    if len(predictions) != len(labels) {
+        panic("frames must be of the same length")
+    }
+
+    var wg sync.WaitGroup
+    var mu sync.Mutex
+    var loss float32
+
+    // Número de goroutines que se ejecutarán
+    numGoroutines := 4
+    chunkSize := len(predictions) / numGoroutines
+
+    for i := 0; i < numGoroutines; i++ {
+        start := i * chunkSize
+        end := start + chunkSize
+        if i == numGoroutines-1 {
+            end = len(predictions)
+        }
+
+        wg.Add(1)
+        go func(start, end int) {
+            defer wg.Done()
+            localLoss := float32(0)
+            for j := start; j < end; j++ {
+                for k := range predictions[j] {
+                    diff := predictions[j][k] - labels[j][k]
+                    localLoss += diff * diff
+                }
+            }
+            mu.Lock()
+            loss += localLoss
+            mu.Unlock()
+        }(start, end)
+    }
+
+    wg.Wait()
+    return loss / float32(len(predictions))
 }
 
-// NeuralNetworkConcurrent representa la red neuronal
-type NeuralNetworkConcurrent struct {
-	InputLayer  NeuronLayerConcurrent
-	HiddenLayer NeuronLayerConcurrent
-	OutputLayer NeuronLayerConcurrent
-	LearningRate float64
-	mu sync.Mutex
+// MLPConcurrent provides a Multi-LayerConcurrent Perceptron which can be configured for
+// any network architecture within that paradigm.
+type MLPConcurrent struct {
+    Layers       []*LayerConcurrent
+    LearningRate float32
+    Introspect   func(step StepConcurrent)
 }
 
-// NewNeuronLayerConcurrent inicializa una capa de neuronas con pesos y sesgos aleatorios
-func NewNeuronLayerConcurrent(inputSize, outputSize int) NeuronLayerConcurrent {
-	rand.Seed(time.Now().UnixNano())
-	weights := make([][]float64, inputSize)
-	for i := range weights {
-		weights[i] = make([]float64, outputSize)
-		for j := range weights[i] {
-			weights[i][j] = rand.Float64()
-		}
-	}
-	biases := make([]float64, outputSize)
-	for i := range biases {
-		biases[i] = rand.Float64()
-	}
-	return NeuronLayerConcurrent{
-		Weights: weights,
-		Biases:  biases,
-		Outputs: make([]float64, outputSize),
-	}
+// StepConcurrent captures status updates that happens within a single Epoch, for use in
+// introspecting models.
+type StepConcurrent struct {
+    Epoch int
+    LossConcurrent  float32
 }
 
-// NewNeuralNetworkConcurrent inicializa una red neuronal con una capa de entrada, una oculta y una de salida
-func NewNeuralNetworkConcurrent(inputSize, hiddenSize, outputSize int, learningRate float64) NeuralNetworkConcurrent {
-	return NeuralNetworkConcurrent{
-		InputLayer:  NewNeuronLayerConcurrent(inputSize, hiddenSize),
-		HiddenLayer: NewNeuronLayerConcurrent(hiddenSize, outputSize),
-		OutputLayer: NewNeuronLayerConcurrent(hiddenSize, outputSize),
-		LearningRate: learningRate,
-	}
+// InitializeConcurrent sets up network layers with the needed memory allocations and
+// references for proper operation. It is called automatically during training,
+// provided separately only to facilitate more precise use of the network from
+// a performance analysis perspective.
+func (n *MLPConcurrent) InitializeConcurrent() {
+    var prev *LayerConcurrent
+    for i, layer := range n.Layers {
+        var next *LayerConcurrent
+        if i < len(n.Layers)-1 {
+            next = n.Layers[i+1]
+        }
+        layer.initializeConcurrent(n, prev, next)
+        prev = layer
+    }
 }
 
-// ForwardConcurrent realiza la propagación hacia adelante concurrentemente
-func (nn *NeuralNetworkConcurrent) ForwardConcurrent(input []float64) []float64 {
-	nn.InputLayer.Outputs = input
+// TrainConcurrent takes in a set of inputs and a set of labels and trains the network
+// using backpropagation to adjust internal weights to minimize loss, over the
+// specified number of epochs. The final loss value is returned after training
+// completes.
+func (n *MLPConcurrent) TrainConcurrent(epochs int, inputs, labels Frame) (float32, error) {
+    if err := n.checkConcurrent(inputs, labels); err != nil {
+        return 0, err
+    }
 
-	// Capa oculta
-	var wg sync.WaitGroup
-	outputsHidden := make([]float64, len(nn.HiddenLayer.Outputs))
-	for j := range outputsHidden {
-		wg.Add(1)
-		go func(j int) {
-			defer wg.Done()
-			sum := nn.HiddenLayer.Biases[j]
-			for i := range nn.InputLayer.Outputs {
-				sum += nn.InputLayer.Outputs[i] * nn.InputLayer.Weights[i][j]
-			}
-			outputsHidden[j] = Sigmoid(sum)
-		}(j)
-	}
-	wg.Wait()
-	nn.mu.Lock()
-	nn.HiddenLayer.Outputs = outputsHidden
-	nn.mu.Unlock()
+    n.InitializeConcurrent()
 
-	// Capa de salida
-	outputsOutput := make([]float64, len(nn.OutputLayer.Outputs))
-	for j := range outputsOutput {
-		wg.Add(1)
-		go func(j int) {
-			defer wg.Done()
-			sum := nn.OutputLayer.Biases[j]
-			for i := range nn.HiddenLayer.Outputs {
-				sum += nn.HiddenLayer.Outputs[i] * nn.HiddenLayer.Weights[i][j]
-			}
-			outputsOutput[j] = Sigmoid(sum)
-		}(j)
-	}
-	wg.Wait()
-	nn.mu.Lock()
-	nn.OutputLayer.Outputs = outputsOutput
-	nn.mu.Unlock()
+    var loss float32
+    for e := 0; e < epochs; e++ {
+        predictions := make(Frame, len(inputs))
 
-	return nn.OutputLayer.Outputs
+        for i, input := range inputs {
+            activations := input
+            for _, layer := range n.Layers {
+                activations = layer.ForwardProp(activations)
+            }
+            predictions[i] = activations
+
+            for step := range n.Layers {
+                l := len(n.Layers) - (step + 1)
+                layer := n.Layers[l]
+
+                if l == 0 {
+                    continue
+                }
+
+                layer.BackProp(labels[i])
+            }
+        }
+
+        loss = LossConcurrent(predictions, labels)
+        if n.Introspect != nil {
+            n.Introspect(StepConcurrent{
+                Epoch: e,
+                LossConcurrent:  loss,
+            })
+        }
+    }
+
+    return loss, nil
 }
 
-// Backward realiza la propagación hacia atrás y actualiza los pesos y sesgos concurrentemente
-func (nn *NeuralNetworkConcurrent) Backward(input, target []float64) {
-	outputDeltas := make([]float64, len(nn.OutputLayer.Outputs))
-	for i := range outputDeltas {
-		error := target[i] - nn.OutputLayer.Outputs[i]
-		outputDeltas[i] = error * SigmoidDerivative(nn.OutputLayer.Outputs[i])
-	}
-
-	hiddenDeltas := make([]float64, len(nn.HiddenLayer.Outputs))
-	for i := range hiddenDeltas {
-		error := 0.0
-		for j := range outputDeltas {
-			error += outputDeltas[j] * nn.HiddenLayer.Weights[i][j]
-		}
-		hiddenDeltas[i] = error * SigmoidDerivative(nn.HiddenLayer.Outputs[i])
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		for i := range nn.HiddenLayer.Outputs {
-			for j := range nn.OutputLayer.Outputs {
-				nn.mu.Lock()
-				nn.HiddenLayer.Weights[i][j] += nn.LearningRate * outputDeltas[j] * nn.HiddenLayer.Outputs[i]
-				nn.mu.Unlock()
-			}
-		}
-		for j := range nn.OutputLayer.Biases {
-			nn.mu.Lock()
-			nn.OutputLayer.Biases[j] += nn.LearningRate * outputDeltas[j]
-			nn.mu.Unlock()
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		for i := range nn.InputLayer.Outputs {
-			for j := range nn.HiddenLayer.Outputs {
-				nn.mu.Lock()
-				nn.InputLayer.Weights[i][j] += nn.LearningRate * hiddenDeltas[j] * nn.InputLayer.Outputs[i]
-				nn.mu.Unlock()
-			}
-		}
-		for j := range nn.HiddenLayer.Biases {
-			nn.mu.Lock()
-			nn.HiddenLayer.Biases[j] += nn.LearningRate * hiddenDeltas[j]
-			nn.mu.Unlock()
-		}
-	}()
-
-	wg.Wait()
+// PredictConcurrent takes in a set of input rows with the width of the input layer, and
+// returns a frame of prediction rows with the width of the output layer,
+// representing the predictions of the network.
+func (n *MLPConcurrent) PredictConcurrent(inputs Frame) Frame {
+    preds := make(Frame, len(inputs))
+    for i, input := range inputs {
+        activations := input
+        for _, layer := range n.Layers {
+            activations = layer.ForwardProp(activations)
+        }
+        preds[i] = activations
+    }
+    return preds
 }
 
-// TrainConcurrent entrena la red neuronal con los datos de entrada y las etiquetas esperadas concurrentemente
-func (nn *NeuralNetworkConcurrent) TrainConcurrent(inputs, targets [][]float64, epochs int) {
-	for epoch := 0; epoch < epochs; epoch++ {
-		var wg sync.WaitGroup
-		for i := range inputs {
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				nn.ForwardConcurrent(inputs[i])
-				nn.Backward(inputs[i], targets[i])
-			}(i)
-		}
-		wg.Wait()
-	}
+func (n *MLPConcurrent) checkConcurrent(inputs Frame, outputs Frame) error {
+    if len(n.Layers) == 0 {
+        return errors.New("ann must have at least one layer")
+    }
+
+    if len(inputs) != len(outputs) {
+        return fmt.Errorf(
+            "inputs count %d mismatched with outputs count %d",
+            len(inputs), len(outputs),
+        )
+    }
+    return nil
+}
+
+// LayerConcurrent defines a layer in the neural network. These are presently basic
+// feed-forward layers that also provide capabilities to facilitate
+// backpropagatin within the MLPConcurrent structure.
+type LayerConcurrent struct {
+    Name                     string
+    Width                    int
+    ActivationFunction       func(float32) float32
+    ActivationFunctionDeriv  func(float32) float32
+    nn                       *MLPConcurrent
+    prev                     *LayerConcurrent
+    next                     *LayerConcurrent
+    initialized              bool
+    weights                  Frame
+    biases                   Vector
+    lastZ                    Vector
+    lastActivations          Vector
+    lastE                    Vector
+    lastL                    Frame
+}
+
+// initializeConcurrent sets up the needed data structures and random initial values for
+// the layer. If key values are unspecified, defaults are configured.
+func (l *LayerConcurrent) initializeConcurrent(nn *MLPConcurrent, prev *LayerConcurrent, next *LayerConcurrent) {
+    if l.initialized || prev == nil {
+        return
+    }
+
+    l.nn = nn
+    l.prev = prev
+    l.next = next
+
+    if l.ActivationFunction == nil {
+        l.ActivationFunction = Sigmoid
+    }
+    if l.ActivationFunctionDeriv == nil {
+        l.ActivationFunctionDeriv = SigmoidDerivative
+    }
+
+    l.weights = make(Frame, l.Width)
+    for i := range l.weights {
+        l.weights[i] = make(Vector, l.prev.Width)
+        for j := range l.weights[i] {
+            weight := rand.NormFloat64() * math.Pow(float64(l.prev.Width), -0.5)
+            l.weights[i][j] = float32(weight)
+        }
+    }
+    l.biases = make(Vector, l.Width)
+    for i := range l.biases {
+        l.biases[i] = rand.Float32()
+    }
+    l.lastE = make(Vector, l.Width)
+    l.lastL = make(Frame, l.Width)
+    for i := range l.lastL {
+        l.lastL[i] = make(Vector, l.prev.Width)
+    }
+
+    l.initialized = true
+}
+
+// ForwardProp takes in a set of inputs from the previous layer and performs
+// forward propagation for the current layer, returning the resulting
+// activations. As a special case, if this LayerConcurrent has no previous layer and is
+// thus the input layer for the network, the values are passed through
+// unmodified. Internal state from the calculation is persisted for later use
+// in back propagation.
+func (l *LayerConcurrent) ForwardProp(input Vector) Vector {
+    if l.prev == nil {
+        l.lastActivations = input
+        return input
+    }
+
+    Z := make(Vector, l.Width)
+    activations := make(Vector, l.Width)
+    for i := range activations {
+        nodeWeights := l.weights[i]
+        nodeBias := l.biases[i]
+        Z[i] = DotProduct(input, nodeWeights) + nodeBias
+        activations[i] = l.ActivationFunction(Z[i])
+    }
+    l.lastZ = Z
+    l.lastActivations = activations
+    return activations
+}
+
+// BackProp performs the training process of back propagation on the layer for
+// the given set of labels. Weights and biases are updated for this layer
+// according to the computed error. Internal state on the backpropagation
+// process is captured for further backpropagation in earlier layers of the
+// network as well.
+func (l *LayerConcurrent) BackProp(label Vector) {
+    if l.next == nil {
+        l.lastE = l.lastActivations.Subtract(label)
+    } else {
+        l.lastE = make(Vector, len(l.lastE))
+        for j := range l.weights {
+            for jn := range l.next.lastL {
+                l.lastE[j] += l.next.lastL[jn][j]
+            }
+        }
+    }
+    dLdA := l.lastE.Scalar(2)
+    dAdZ := l.lastZ.Apply(l.ActivationFunctionDeriv)
+
+    for j := range l.weights {
+        l.lastL[j] = l.weights[j].Scalar(l.lastE[j])
+    }
+
+    for j := range l.weights {
+        for k := range l.weights[j] {
+            dZdW := l.prev.lastActivations[k]
+            dLdW := dLdA[j] * dAdZ[j] * dZdW
+            l.weights[j][k] -= dLdW * l.nn.LearningRate
+        }
+    }
+
+    biasUpdate := dLdA.ElementwiseProduct(dAdZ)
+    l.biases = l.biases.Subtract(biasUpdate.Scalar(l.nn.LearningRate))
 }
