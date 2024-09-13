@@ -13,8 +13,8 @@ import (
 
 func main() {
 	//Leer archivos
-	df_ratings := utils.LoadDataset("dataset/ratings.csv")	
-    df_higgs := utils.LoadDataset("dataset/Higgs.csv")
+	df_ratings := utils.LoadDataset("datasets/ratings.csv")	
+    df_higgs := utils.LoadDataset("datasets/Higgs.csv")
 
 	//Procesar datos para conseguir xData y yData
 	xData, yData, error := utils.ProcessData(df_higgs)
