@@ -13,22 +13,17 @@ func LossConcurrent(predictions, labels Frame) float32 {
     if len(predictions) != len(labels) {
         panic("frames must be of the same length")
     }
-
     var wg sync.WaitGroup
     var mu sync.Mutex
     var loss float32
-
-    // Número de goroutines que se ejecutarán
     numGoroutines := 4
     chunkSize := len(predictions) / numGoroutines
-
     for i := 0; i < numGoroutines; i++ {
         start := i * chunkSize
         end := start + chunkSize
         if i == numGoroutines-1 {
             end = len(predictions)
         }
-
         wg.Add(1)
         go func(start, end int) {
             defer wg.Done()
@@ -44,7 +39,6 @@ func LossConcurrent(predictions, labels Frame) float32 {
             mu.Unlock()
         }(start, end)
     }
-
     wg.Wait()
     return loss / float32(len(predictions))
 }

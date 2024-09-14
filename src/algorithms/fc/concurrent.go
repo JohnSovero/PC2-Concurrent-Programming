@@ -53,12 +53,10 @@ func RecommendConcurrent(ratings *RatingsConcurrent, user string, k int) []strin
     similaritySums := make(map[string]float64)
     var mu sync.Mutex
     var wg sync.WaitGroup
-
     for otherUser := range ratings.data {
         if otherUser == user {
             continue
         }
-
         wg.Add(1)
         go func(otherUser string) {
             defer wg.Done()
@@ -66,33 +64,26 @@ func RecommendConcurrent(ratings *RatingsConcurrent, user string, k int) []strin
             if similarity <= 0 {
                 return
             }
-
             mu.Lock()
             defer mu.Unlock()
             for item, rating := range ratings.data[otherUser] {
                 if _, exists := ratings.data[user][item]; exists {
                     continue
                 }
-
                 scores[item] += similarity * rating
                 similaritySums[item] += similarity
             }
         }(otherUser)
     }
-
     wg.Wait()
-
     recommendations := make([]string, 0, k)
     for item := range scores {
         scores[item] /= similaritySums[item]
         recommendations = append(recommendations, item)
     }
-
-    // Ordenar las recomendaciones por puntuación (descendente)
     sort.Slice(recommendations, func(i, j int) bool {
         return scores[recommendations[i]] > scores[recommendations[j]]
     })
-
     if len(recommendations) > k {
         return recommendations[:k]
     }

@@ -53,8 +53,7 @@ type BranchConcurrent struct {
 	Depth            int
 }
 
-func (forest *ForestConcurrent) buildNewTrees(firstIndex int, trees int) {
-	// constrain parallelism, use buffered channel as counting semaphore
+func (forest *ForestConcurrent) buildNewTreesConcurrent(firstIndex int, trees int) {
 	s := make(chan bool, NumWorkersConcurrent)
 	for i := 0; i < trees; i++ {
 		s <- true
@@ -63,7 +62,6 @@ func (forest *ForestConcurrent) buildNewTrees(firstIndex int, trees int) {
 			forest.newTree(j)
 		}(firstIndex + i)
 	}
-	// wait for all trees to finish
 	for i := 0; i < NumWorkersConcurrent; i++ {
 		s <- true
 	}
@@ -74,7 +72,7 @@ func (forest *ForestConcurrent) TrainConcurrent(trees int) {
 	forest.defaults()
 	forest.NTrees = trees
 	forest.Trees = make([]TreeConcurrent, forest.NTrees)
-	forest.buildNewTrees(0, trees)
+	forest.buildNewTreesConcurrent(0, trees)
 	imp := make([]float64, forest.Features)
 	for i := 0; i < trees; i++ {
 		z := forest.Trees[i].importance(forest)
@@ -126,7 +124,7 @@ func (forest *ForestConcurrent) AddDataRow(data []float64, class int, max int, n
 	for i := 0; i < newTrees; i++ {
 		forest.Trees = append(forest.Trees, TreeConcurrent{})
 	}
-	forest.buildNewTrees(index, newTrees)
+	forest.buildNewTreesConcurrent(index, newTrees)
 	//remove old trees
 	if len(forest.Trees) > maxTrees && maxTrees > 0 {
 		forest.Trees = forest.Trees[len(forest.Trees)-maxTrees:]

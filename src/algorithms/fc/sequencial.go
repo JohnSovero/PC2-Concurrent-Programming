@@ -50,12 +50,10 @@ func CosineSimilaritySequencial(ratings *RatingsSequencial, user1, user2 string)
 func RecommendSequencial(ratings *RatingsSequencial, user string, k int) []string {
 	scores := make(map[string]float64)
 	similaritySums := make(map[string]float64)
-
 	for otherUser := range ratings.data {
 		if otherUser == user {
 			continue
 		}
-
 		similarity := CosineSimilaritySequencial(ratings, user, otherUser)
 		if similarity <= 0 {
 			continue
@@ -70,18 +68,15 @@ func RecommendSequencial(ratings *RatingsSequencial, user string, k int) []strin
 			similaritySums[item] += similarity
 		}
 	}
-
 	recommendations := make([]string, 0, k)
 	for item := range scores {
 		scores[item] /= similaritySums[item]
 		recommendations = append(recommendations, item)
 	}
-
 	// Ordenar las recomendaciones por puntuación (descendente)
 	sort.Slice(recommendations, func(i, j int) bool {
 		return scores[recommendations[i]] > scores[recommendations[j]]
 	})
-
 	if len(recommendations) > k {
 		return recommendations[:k]
 	}
