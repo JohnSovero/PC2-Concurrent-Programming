@@ -1,2 +1,5 @@
 # PC2-Concurrent-Programming
-PC2
+Autor: John Davids Sovero Cubillas
+Práctica Calificada 2
+
+Implementación de Algoritmos de Machine Learning secuenciales y concurrentes en Go
